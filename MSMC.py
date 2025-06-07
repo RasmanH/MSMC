@@ -77,7 +77,13 @@ class Capture:
         if self.access != None: message+=f"\nEmail Access: {self.access}"
         if self.sbcoins != None: message+=f"\nHypixel Skyblock Coins: {self.sbcoins}"
         if self.bwstars != None: message+=f"\nHypixel Bedwars Stars: {self.bwstars}"
-        if config.get('hypixelban') is True: message+=f"\nDonutSMP Banned: {self.banned or 'Unknown'}"
+        if config.get('hypixelban') is True: 
+            ban_status = self.banned or 'Unknown'
+            # Only show actual ban status, not "False" statuses
+            if ban_status.startswith('False'):
+                message += f"\nDonutSMP Banned: No ({ban_status.split('(', 1)[1].rstrip(')')})"
+            else:
+                message += f"\nDonutSMP Banned: {ban_status}"
         if self.namechanged != None: message+=f"\nCan Change Name: {self.namechanged}"
         if self.lastchanged != None: message+=f"\nLast Name Change: {self.lastchanged}"
         return message+"\n============================\n"
@@ -221,48 +227,137 @@ class Capture:
                     elif "text" in data:
                         disconnect_text = data["text"]
                     
-                    # Check if it's actually banned or just a normal disconnect
-                    if any(phrase in data_str for phrase in ["banned", "suspend", "punishment", "violation", "appeal"]):
-                        # Actual ban detection
-                        if "temporarily" in data_str or "temp" in data_str:
-                            self.banned = f"[Temporary] {disconnect_text}"
-                        else:
-                            self.banned = f"[Permanently] {disconnect_text}"
+                    disconnect_lower = disconnect_text.lower()
+                    
+                    # DonutSMP specific ban detection patterns
+                    if "ratting date:" in disconnect_lower and "ban id:" in disconnect_lower:
+                        # Handle ratting/malicious activity bans
+                        ban_id = ""
+                        ratting_date = ""
+                        
+                        try:
+                            # Extract ban ID
+                            if "ban id:" in disconnect_lower:
+                                ban_id = disconnect_text.split("Ban ID:")[1].split()[0].strip()
+                            
+                            # Extract ratting date
+                            if "ratting date:" in disconnect_lower:
+                                ratting_date = disconnect_text.split("Ratting Date:")[1].split("Ban ID:")[0].strip()
+                        except:
+                            pass
+                        
+                        ban_message = f"[Ratting/Malicious Activity] Date: {ratting_date}"
+                        if ban_id:
+                            ban_message += f" | Ban ID: {ban_id}"
+                        if "appeal" in disconnect_lower and "discord.gg" in disconnect_lower:
+                            ban_message += " | Appeal: discord.gg/donutsmp"
+                            
+                        self.banned = ban_message
                         with open(f"results/{fname}/Banned.txt", 'a') as f: 
                             f.write(f"{self.email}:{self.password}\n")
-                    elif any(phrase in data_str for phrase in ["whitelist", "not whitelisted", "not on whitelist"]):
-                        # Server is whitelisted but account not banned
+                    
+                    elif "your account was hacked" in disconnect_lower and "banned" in disconnect_lower:
+                        # Handle hacked account bans
+                        ban_id = ""
+                        ban_date = ""
+                        
+                        try:
+                            if "ban id:" in disconnect_lower:
+                                ban_id = disconnect_text.split("Ban ID:")[1].split()[0].strip()
+                            if "date:" in disconnect_lower:
+                                ban_date = disconnect_text.split("Date:")[1].split("Ban ID:")[0].strip()
+                        except:
+                            pass
+                        
+                        ban_message = f"[Account Compromised] Hacked account"
+                        if ban_date:
+                            ban_message += f" | Date: {ban_date}"
+                        if ban_id:
+                            ban_message += f" | Ban ID: {ban_id}"
+                        if "appeal" in disconnect_lower:
+                            ban_message += " | Appeal: discord.gg/donutsmp"
+                            
+                        self.banned = ban_message
+                        with open(f"results/{fname}/Banned.txt", 'a') as f: 
+                            f.write(f"{self.email}:{self.password}\n")
+                    
+                    elif any(phrase in disconnect_lower for phrase in ["banned", "suspend", "punishment", "violation"]):
+                        # Other ban types - try to extract ban ID and duration
+                        ban_id = ""
+                        duration = ""
+                        ban_date = ""
+                        
+                        try:
+                            # Extract ban ID
+                            if "ban id:" in disconnect_lower:
+                                ban_id = disconnect_text.split("Ban ID:")[1].split()[0].strip()
+                            
+                            # Extract date
+                            if "date:" in disconnect_lower:
+                                ban_date = disconnect_text.split("Date:")[1].split("Ban ID:")[0].strip()
+                            
+                            # Extract duration/expiry
+                            if any(phrase in disconnect_lower for phrase in ["expires", "until", "days", "hours", "minutes"]):
+                                import re
+                                duration_patterns = [
+                                    r'expires?\s+in\s+(\d+\s+\w+)',
+                                    r'until\s+([^.]+)',
+                                    r'for\s+(\d+\s+\w+)',
+                                    r'(\d+\s+(?:day|hour|minute)s?)'
+                                ]
+                                for pattern in duration_patterns:
+                                    match = re.search(pattern, disconnect_lower)
+                                    if match:
+                                        duration = match.group(1).strip()
+                                        break
+                        except:
+                            pass
+                        
+                        # Determine ban type
+                        if duration or any(phrase in disconnect_lower for phrase in ["temporary", "temp", "expires"]):
+                            ban_type = f"[Temporary{f' - {duration}' if duration else ''}]"
+                        else:
+                            ban_type = "[Permanently]"
+                        
+                        ban_message = f"{ban_type} Generic ban"
+                        if ban_date:
+                            ban_message += f" | Date: {ban_date}"
+                        if ban_id:
+                            ban_message += f" | Ban ID: {ban_id}"
+                        if "appeal" in disconnect_lower and "discord" in disconnect_lower:
+                            ban_message += " | Appeal: discord.gg/donutsmp"
+                            
+                        self.banned = ban_message
+                        with open(f"results/{fname}/Banned.txt", 'a') as f: 
+                            f.write(f"{self.email}:{self.password}\n")
+                    
+                    elif any(phrase in disconnect_lower for phrase in ["whitelist", "not whitelisted", "not on whitelist"]):
                         self.banned = "False (Not Whitelisted)"
                         with open(f"results/{fname}/Unbanned.txt", 'a') as f: 
                             f.write(f"{self.email}:{self.password}\n")
-                    elif any(phrase in data_str for phrase in ["server is full", "server full", "full"]):
-                        # Server is full but account not banned
+                    elif any(phrase in disconnect_lower for phrase in ["server is full", "server full", "full"]):
                         self.banned = "False (Server Full)"
                         with open(f"results/{fname}/Unbanned.txt", 'a') as f: 
                             f.write(f"{self.email}:{self.password}\n")
-                    elif any(phrase in data_str for phrase in ["outdated", "version", "update"]):
-                        # Version mismatch but not banned
+                    elif any(phrase in disconnect_lower for phrase in ["outdated", "version", "update"]):
                         self.banned = "False (Version Mismatch)"
                         with open(f"results/{fname}/Unbanned.txt", 'a') as f: 
                             f.write(f"{self.email}:{self.password}\n")
-                    elif any(phrase in data_str for phrase in ["maintenance", "restart", "reboot", "closed"]):
-                        # Server maintenance - not banned
+                    elif any(phrase in disconnect_lower for phrase in ["maintenance", "restart", "reboot", "closed"]):
                         self.banned = "False (Server Maintenance)"
                         with open(f"results/{fname}/Unbanned.txt", 'a') as f: 
                             f.write(f"{self.email}:{self.password}\n")
-                    elif any(phrase in data_str for phrase in ["error", "failed", "connection", "timeout"]):
-                        # Connection error - not banned
+                    elif any(phrase in disconnect_lower for phrase in ["error", "failed", "connection", "timeout"]):
                         self.banned = "False (Connection Error)"
                         with open(f"results/{fname}/Unbanned.txt", 'a') as f: 
                             f.write(f"{self.email}:{self.password}\n")
                     elif disconnect_text.strip() == "" or len(disconnect_text.strip()) < 3:
-                        # Empty or very short message - likely not banned
                         self.banned = "False (Empty Disconnect)"
                         with open(f"results/{fname}/Unbanned.txt", 'a') as f: 
                             f.write(f"{self.email}:{self.password}\n")
                     else:
-                        # Unknown disconnect - be more conservative and treat as not banned unless explicitly stated
-                        self.banned = f"False (Unknown: {disconnect_text})"
+                        # Unknown disconnect - be conservative
+                        self.banned = f"False (Unknown: {disconnect_text[:50]}...)"
                         with open(f"results/{fname}/Unbanned.txt", 'a') as f: 
                             f.write(f"{self.email}:{self.password}\n")
                 
