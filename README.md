@@ -26,7 +26,7 @@ You do not need to install tor. Tor is automatically installed when selected for
 
 install [python](https://www.python.org/downloads/) and [git](https://git-scm.com/download/win)
 ```
-git clone https://github.com/MachineKillin/MSMC
+git clone https://github.com/RasmanH/MSMC
 cd MSMC
 pip install -r requirements.txt
 python MSMC.py
