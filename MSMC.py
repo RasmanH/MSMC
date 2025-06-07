@@ -212,52 +212,59 @@ class Capture:
                 @connection.listener(clientbound.login.DisconnectPacket, early=True)
                 def login_disconnect(packet):
                     data = json.loads(str(packet.json_data))
+                    data_str = str(data).lower()
                     
-                    # Updated ban detection patterns for DonutSMP
-                    if "banned" in str(data).lower():
-                        # Generic ban detection
-                        ban_text = ''.join(item.get("text", "") for item in data.get("extra", []) if isinstance(item, dict))
-                        self.banned = f"[Permanently] {ban_text}"
+                    # Extract the actual disconnect message
+                    disconnect_text = ""
+                    if "extra" in data and isinstance(data["extra"], list):
+                        disconnect_text = ''.join(item.get("text", "") for item in data["extra"] if isinstance(item, dict))
+                    elif "text" in data:
+                        disconnect_text = data["text"]
+                    
+                    # Check if it's actually banned or just a normal disconnect
+                    if any(phrase in data_str for phrase in ["banned", "suspend", "punishment", "violation", "appeal"]):
+                        # Actual ban detection
+                        if "temporarily" in data_str or "temp" in data_str:
+                            self.banned = f"[Temporary] {disconnect_text}"
+                        else:
+                            self.banned = f"[Permanently] {disconnect_text}"
                         with open(f"results/{fname}/Banned.txt", 'a') as f: 
                             f.write(f"{self.email}:{self.password}\n")
-                    elif "temporarily banned" in str(data).lower():
-                        # Temporary ban detection
-                        ban_text = ''.join(item.get("text", "") for item in data.get("extra", []) if isinstance(item, dict))
-                        self.banned = f"[Temporary] {ban_text}"
-                        with open(f"results/{fname}/Banned.txt", 'a') as f: 
-                            f.write(f"{self.email}:{self.password}\n")
-                    elif "kick" in str(data).lower() and "ban" in str(data).lower():
-                        # Kicked with ban message
-                        ban_text = ''.join(item.get("text", "") for item in data.get("extra", []) if isinstance(item, dict))
-                        self.banned = f"[Kicked/Banned] {ban_text}"
-                        with open(f"results/{fname}/Banned.txt", 'a') as f: 
-                            f.write(f"{self.email}:{self.password}\n")
-                    elif any(phrase in str(data).lower() for phrase in ["whitelist", "not whitelisted"]):
+                    elif any(phrase in data_str for phrase in ["whitelist", "not whitelisted", "not on whitelist"]):
                         # Server is whitelisted but account not banned
                         self.banned = "False (Not Whitelisted)"
                         with open(f"results/{fname}/Unbanned.txt", 'a') as f: 
                             f.write(f"{self.email}:{self.password}\n")
-                    elif any(phrase in str(data).lower() for phrase in ["server is full", "server full"]):
+                    elif any(phrase in data_str for phrase in ["server is full", "server full", "full"]):
                         # Server is full but account not banned
                         self.banned = "False (Server Full)"
                         with open(f"results/{fname}/Unbanned.txt", 'a') as f: 
                             f.write(f"{self.email}:{self.password}\n")
-                    elif "outdated" in str(data).lower():
+                    elif any(phrase in data_str for phrase in ["outdated", "version", "update"]):
                         # Version mismatch but not banned
                         self.banned = "False (Version Mismatch)"
                         with open(f"results/{fname}/Unbanned.txt", 'a') as f: 
                             f.write(f"{self.email}:{self.password}\n")
+                    elif any(phrase in data_str for phrase in ["maintenance", "restart", "reboot", "closed"]):
+                        # Server maintenance - not banned
+                        self.banned = "False (Server Maintenance)"
+                        with open(f"results/{fname}/Unbanned.txt", 'a') as f: 
+                            f.write(f"{self.email}:{self.password}\n")
+                    elif any(phrase in data_str for phrase in ["error", "failed", "connection", "timeout"]):
+                        # Connection error - not banned
+                        self.banned = "False (Connection Error)"
+                        with open(f"results/{fname}/Unbanned.txt", 'a') as f: 
+                            f.write(f"{self.email}:{self.password}\n")
+                    elif disconnect_text.strip() == "" or len(disconnect_text.strip()) < 3:
+                        # Empty or very short message - likely not banned
+                        self.banned = "False (Empty Disconnect)"
+                        with open(f"results/{fname}/Unbanned.txt", 'a') as f: 
+                            f.write(f"{self.email}:{self.password}\n")
                     else:
-                        # Unknown disconnect reason - treat as potentially banned
-                        disconnect_text = ''.join(item.get("text", "") for item in data.get("extra", []) if isinstance(item, dict))
-                        if disconnect_text.strip():
-                            self.banned = f"[Unknown] {disconnect_text}"
-                            with open(f"results/{fname}/Banned.txt", 'a') as f: 
-                                f.write(f"{self.email}:{self.password}\n")
-                        else:
-                            self.banned = "Unknown Disconnect"
-                            with open(f"results/{fname}/Banned.txt", 'a') as f: 
-                                f.write(f"{self.email}:{self.password}\n")
+                        # Unknown disconnect - be more conservative and treat as not banned unless explicitly stated
+                        self.banned = f"False (Unknown: {disconnect_text})"
+                        with open(f"results/{fname}/Unbanned.txt", 'a') as f: 
+                            f.write(f"{self.email}:{self.password}\n")
                 
                 @connection.listener(clientbound.play.JoinGamePacket, early=True)
                 def joined_server(packet):
